@@ -149,66 +149,24 @@ class Bipedal_hybrid():
         # endregion
         return inertia_main, inertia_coupling
 
-    def SupportForce(self, q, dq, ddq):
-        m0 = self.mm1[0]
-        m1 = self.mm1[1]
-        m2 = self.mm2[0]
-        m3 = self.mm2[1]
-        l0 = self.l[0]
-        l1 = self.l[1]
-        l2 = self.l[2]
-        l3 = self.l[3]
-        L0 = self.L[0]
-        L1 = self.L[1]
-        L2 = self.L[2]
-        L3 = self.L[3]
-        # acceleration cal
-        
-        Fx3 = 0.5*L3*m3*ddq[3]*c(q[0]+q[1]+q[2]+q[3])-0.5*L3*m3*dq[3]**2*s(q[0]+q[1]+q[2]+q[3])
-        Fy3 = m3*self.g-0.5*L3*m3*ddq[3]*s(q[0]+q[1]+q[2]+q[3])-0.5*L3*m3*dq[3]**2*c(q[0]+q[1]+q[2]+q[3])
-        Fx2 = 0.5*L2*m2*ddq[2]*c(q[0]+q[1]+q[2])-0.5*L2*m2*dq[2]**2*s(q[0]+q[1]+q[2]) - Fx3
-        Fy2 = m2*self.g-0.5*L2*m2*ddq[2]*s(q[0]+q[1]+q[2])-0.5*L2*m2*dq[2]**2*c(q[0]+q[1]+q[2]) - Fy3
-        Fx1 = 0.5*L1*m1*ddq[1]*c(q[0]+q[1])-0.5*L1*m1*dq[1]**2*s(q[0]+q[1]) - Fx2
-        Fy1 = m1*self.g-0.5*L1*m1*ddq[1]*s(q[0]+q[1])-0.5*L1*m1*dq[1]**2*c(q[0]+q[1]) - Fy2
-        AccFx = 0.5*L0*m0*ddq[0]*c(q[0])-0.5*L0*m0*dq[0]**2*s(q[0]) - Fx1
-        AccFy = m0*self.g-0.5*L0*m0*ddq[0]*s(q[0])-0.5*L0*m0*dq[0]**2*c(q[0]) - Fy1
-
-        AccF = [AccFx, AccFy]
-
-        return AccF
-        pass
 
     @staticmethod
     def get_posture(q):
         L = [0.35, 0.35]
-        lsx = np.zeros(2)
-        lsy = np.zeros(2)
-        ltx = np.zeros(2)
-        lty = np.zeros(2)
-        lax = np.zeros(2)
-        lay = np.zeros(2)
-        lafx = np.zeros(2)
-        lafy = np.zeros(2)
-        lsx[0] = 0
-        lsx[1] = lsx[0] + L[0]*np.sin(q[0])
-        lsy[0] = 0
-        lsy[1] = lsy[0] + L[0]*np.cos(q[0])
+        l_upper_x = np.zeros(2)
+        l_upper_y = np.zeros(2)
+        l_forearm_x = np.zeros(2)
+        l_forearm_y = np.zeros(2)
+        l_upper_x[0] = 0
+        l_upper_x[1] = l_upper_x[0] + L[0]*np.sin(q[0])
+        l_upper_y[0] = 0
+        l_upper_y[1] = l_upper_y[0] + L[0]*np.cos(q[0])
 
-        ltx[0] = 0 + L[0]*np.sin(q[0])
-        ltx[1] = ltx[0] + L[1]*np.sin(q[0]+q[1])
-        lty[0] = 0 + L[0]*np.cos(q[0])
-        lty[1] = lty[0] + L[1]*np.cos(q[0]+q[1])
-
-        lax[0] = 0 + L[0]*np.sin(q[0]) + L[1]*np.sin(q[0]+q[1])
-        lax[1] = lax[0] + L[2]*np.sin(q[0]+q[1]+q[2])
-        lay[0] = 0 + L[0]*np.cos(q[0]) + L[1]*np.cos(q[0]+q[1])
-        lay[1] = lay[0] + L[2]*np.cos(q[0]+q[1]+q[2])
-
-        lafx[0] = 0 + L[0]*np.sin(q[0]) + L[1]*np.sin(q[0]+q[1])+L[2]*np.sin(q[0]+q[1]+q[2])
-        lafx[1] = lafx[0] + L[3]*np.sin(q[0]+q[1]+q[2]+q[3])
-        lafy[0] = 0 + L[0]*np.cos(q[0]) + L[1]*np.cos(q[0]+q[1])+L[2]*np.cos(q[0]+q[1]+q[2])
-        lafy[1] = lafy[0] + L[3]*np.cos(q[0]+q[1]+q[2]+q[3])
-        return [lsx, lsy, ltx, lty, lax, lay, lafx, lafy]
+        l_forearm_x[0] = 0 + L[0]*np.sin(q[0])
+        l_forearm_x[1] = l_forearm_x[0] + L[1]*np.sin(q[0]+q[1])
+        l_forearm_y[0] = 0 + L[0]*np.cos(q[0])
+        l_forearm_y[1] = l_forearm_y[0] + L[1]*np.cos(q[0]+q[1])
+        return [l_upper_x, l_upper_y, l_forearm_x, l_forearm_y]
 
     @staticmethod
     def get_motor_boundary(speed, MaxTorque=36, CriticalSpeed=27, MaxSpeed=53):

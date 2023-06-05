@@ -23,26 +23,18 @@ import matplotlib.animation as animation
 
 
 class Bipedal_hybrid():
-    def __init__(self, Im, cfg):
+    def __init__(self, cfg):
         self.opti = ca.Opti()
 
         # time and collection defination related parameter
         self.T = cfg['Controller']['Period']
-        self.Im = Im
+        self.Im = cfg['Robot']['Motor']['Inertia']
         self.N = cfg['Controller']['CollectionNum']
         self.dt = self.T / self.N
-        
-        # mass and geometry related parameter
-        # self.mm1 = [0.0, 0.0]
-        self.m = self.opti.variable(2)
-        self.gam = self.opti.variable(2)
 
-        self.L = [cfg['Robot']['Geometry']['L1'],
-                  cfg['Robot']['Geometry']['L1']]
-        
-        self.I = [self.m[0]*self.L[0]**2/12, self.m[1]*self.L[1]**2/12]
+        self.L = cfg['Robot']['Geometry']['length']
+        self.dof = len(self.L)
         self.l = cfg['Robot']['Mass']['massCenter']
-        # self.I_ = [self.m[i]*self.l[i]**2+self.I[i] for i in range(4)]
 
         # motor parameter
         self.motor_cs = cfg['Robot']['Motor']['CriticalSpeed']
@@ -53,6 +45,20 @@ class Bipedal_hybrid():
         self.mu = cfg['Environment']['Friction_Coeff']
         self.g = cfg['Environment']['Gravity']
         self.damping = cfg['Robot']['damping']
+
+        ## define variable
+        # mass and gamma 
+        self.m = self.opti.variable(2)
+        self.gam = self.opti.variable(2)
+
+        # motion
+        self.q = [self.opti.variable(2) for _ in range(self.N)]
+        self.dq = [self.opti.variable(2) for _ in range(self.N)]
+        self.ddq = [(self.dq[i+1]-self.dq[i]) /
+                        self.dt for i in range(self.N-1)]
+        self.u = [self.opti.variable(2) for _ in range(self.N)]
+
+        self.I = [self.m[0]*self.L[0]**2/12, self.m[1]*self.L[1]**2/12]
 
         # boundry
         self.m_UB = [10.0, 10.0]
@@ -70,15 +76,6 @@ class Bipedal_hybrid():
         self.dq_LB = [-self.motor_ms/self.gam[0], -self.motor_ms/self.gam[1]]   # arm 
 
         self.dq_UB = [self.motor_ms/self.gam[0], self.motor_ms/self.gam[1]] # arm 
-
-        # * define variable
-        self.q = [self.opti.variable(2) for _ in range(self.N)]
-        self.dq = [self.opti.variable(2) for _ in range(self.N)]
-        self.ddq = [(self.dq[i+1]-self.dq[i]) /
-                        self.dt for i in range(self.N-1)]
-
-        # ! set the last u to be zero at constraint
-        self.u = [self.opti.variable(2) for _ in range(self.N)]
 
         pass
 
@@ -149,6 +146,39 @@ class Bipedal_hybrid():
         # endregion
         return inertia_main, inertia_coupling
 
+    def get_endvel(self, q, dq):
+        L = self.L
+
+        vx = L[0]*s(q[0])*dq[0] + L[1]*s(q[0]+q[1])*(dq[0]+dq[1])
+        vy = -L[0]*c(q[0])*dq[0] - L[1]*c(q[0]+q[1])*(dq[0]+dq[1])
+
+        return vx, vy
+
+    def get_comvel(self, q, dq):
+        L = self.L
+        l = self.l
+        v = [[0.0, 0.0], [0.0, 0.0]]
+
+        v[0][0] = l[0]*c(q[0])*dq[0]
+        v[0][1] = -l[0]*s(q[0])*dq[0]
+
+        v[1][0] = L[0]*c(q[0])*dq[0] + l[1]*c(q[0]+q[1])*(dq[0]+dq[1])
+        v[1][1] = -L[0]*s(q[0])*dq[0] - l[1]*s(q[0]+q[1])*(dq[0]+dq[1])
+
+        return v
+
+    def get_compos(self, q):
+        L = self.L
+        l = self.l
+        pos = [[0.0, 0.0], [0.0, 0.0]]
+
+        pos[0][0] = l[0]*s(q[0])
+        pos[0][1] = l[0]*s(q[0])
+
+        pos[1][0] = L[0]*s(q[0]) + l[1]*s(q[0]+q[1])
+        pos[1][1] = L[0]*c(q[0]) + l[1]*c(q[0]+q[1])
+
+        return pos
 
     @staticmethod
     def get_posture(q):
@@ -186,6 +216,7 @@ class nlp():
         # load parameter
         self.cfg = cfg
         self.armflag = armflag
+        self.T = cfg['Controller']['Period']
         self.trackingCoeff = cfg["Optimization"]["CostCoeff"]["trackingCoeff"]
         self.velCoeff = cfg["Optimization"]["CostCoeff"]["VelCoeff"]
         self.powerCoeff = cfg["Optimization"]["CostCoeff"]["powerCoeff"]
@@ -227,33 +258,42 @@ class nlp():
         force = 0
         VelTar = 0
         PosTar = 0
-        Ptar = [0, 0, np.pi, 0.0]
-        # Pf = [0.3]*4
-        # Vf = [0.6]*4
-        # Ff = [0.1]*4 
+        smooth = 0
         # endregion
         
         for i in range(walker.N):
+            # font vel cal
+            vxi, vyi = walker.get_endvel(walker.q[i], walker.dq[i])
+            vi = np.sqrt(vxi**2 + vyi**2)
+
+            # angular momt cal
+            ri = walker.get_compos(walker.q[i])
+            v = walker.get_comvel(walker.q[i], walker.dq[i])
+
+            Hi = walker.m[0]*(ri[0][0]*v[0][1]-ri[0][1]*v[0][0]) + walker.I[0]*walker.dq[i][0] + \
+                 walker.m[1]*(ri[1][0]*v[1][1]-ri[1][1]*v[1][0]) + walker.I[1]*(walker.dq[i][0]+walker.dq[i][1])
+
+            PosTar += (Hi/10)**2 * walker.dt
+            VelTar += (vi/20)**2 * walker.dt
             for k in range(2):
                 power += ((walker.dq[i][k]*walker.u[i][k]) / (walker.motor_ms*walker.motor_mt))**2 * walker.dt
                 force += (walker.u[i][k] / walker.u_UB[k])**2 * walker.dt
 
-                VelTar += (walker.dq[i][k]/walker.dq_UB[k])**2 * walker.dt
-                PosTar += ((walker.q[i][k] - Ptar[k])/walker.q_UB[k])**2 * walker.dt            
+                # VelTar += (walker.dq[i][k]/walker.dq_UB[k])**2 * walker.dt
+                # PosTar += ((walker.q[i][k] - Ptar[k])/walker.q_UB[k])**2 * walker.dt            
                 pass
             pass
         
-        for j in range(2):
-            VelTar += (walker.dq[-1][j]/walker.dq_UB[k])**2 
-            PosTar += ((walker.q[-1][j] - Ptar[j])/walker.q_UB[k])**2
-       
-        u = walker.u
+        # for j in range(2):
+            # VelTar += (walker.dq[-1][j]/walker.dq_UB[k])**2 
+            # PosTar += ((walker.q[-1][j] - Ptar[j])/walker.q_UB[k])**2
 
-        smooth = 0
-        AM = [100, 400, 100]
+        VelTar += (vi/20)**2
+        PosTar += (Hi/10)**2        
+
         for i in range(walker.N-1):
             for k in range(2):
-                smooth += ((u[i+1][k]-u[i][k])/10)**2
+                smooth += ((walker.u[i+1][k]-walker.u[i][k])/10)**2
                 pass
             pass
 
@@ -299,14 +339,12 @@ class nlp():
             ceq.extend([walker.opti.bounded(walker.u_LB[j],
                         temp_u[j], walker.u_UB[j]) for j in range(2)])
 
-        for temp_m in walker.m:
-            ceq.extend([walker.opti.bounded(walker.m_LB[j],
-                        temp_m[j], walker.m_UB[j]) for j in range(2)])
+        ceq.extend([walker.opti.bounded(walker.m_LB[j],
+                    walker.m[j], walker.m_UB[j]) for j in range(2)])
 
-        for temp_gam in walker.gam:
-            ceq.extend([walker.opti.bounded(walker.gam_LB[j],
-                        temp_gam[j], walker.gam_UB[j]) for j in range(2)])
-            pass
+        ceq.extend([walker.opti.bounded(walker.gam_LB[j],
+                    walker.gam[j], walker.gam_UB[j]) for j in range(2)])
+
         # endregion
 
         # region motor external characteristic curve
@@ -326,9 +364,8 @@ class nlp():
 
         # endregion
 
-        theta = np.pi/30
-        ceq.extend([walker.q[0][0]==theta])
-        ceq.extend([walker.q[0][1]==theta*0.2])
+        ceq.extend([walker.q[0][0 ]== -np.pi* 0.1])
+        ceq.extend([walker.q[0][1] == -np.pi* 0.8])
 
         ceq.extend([walker.dq[0][0]==0])
         ceq.extend([walker.dq[0][1]==0])
@@ -342,7 +379,7 @@ class nlp():
 
         return ceq
 
-    def solve_and_output(self, robot, flag_save=True, StorePath="./"):
+    def solve_and_output(self, robot, flag_save=True, StorePath="./", **params):
         # solve the nlp and stroge the solution
         q = []
         dq = []
@@ -401,6 +438,22 @@ class nlp():
             u = np.asarray(u)
             t = np.asarray(t).reshape([-1, 1])
 
+            if flag_save:
+                # datename initial
+                date = params['date']
+                dirname = "-Traj-Tcf_"+str(self.trackingCoeff)+"-Pcf_"+str(self.powerCoeff)+"-Fcf_"+str(self.forceCoeff)+\
+                        "-Scf_"+str(self.smoothCoeff)+"-T_"+str(self.T)
+                save_dir = StorePath + date + dirname+ "/"
+
+                if not os.path.isdir(save_dir):
+                    os.makedirs(save_dir)
+
+                with open(save_dir+"config.yaml", mode='w') as file:
+                    YAML().dump(self.cfg, file)
+                Data = {'u': u, "q": q, "dq": dq, "ddq": ddq, "t": t}
+                with open(os.path.join(save_dir, "sol.pkl"), 'wb') as f:
+                    pickle.dump(Data, f)
+
             return q, dq, ddq, u, t, gamma, m
 
 def main():
@@ -412,6 +465,7 @@ def main():
     # region: filepath
     StorePath = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     todaytime=datetime.date.today()
+    date = time.strftime("%Y-%m-%d-%H-%M-%S")
     ani_path = StorePath + "/data/animation/"
     save_dir = StorePath + "/data/" + str(todaytime) + "/"
     if not os.path.isdir(save_dir):
@@ -425,22 +479,41 @@ def main():
     # endregion
 
     # region create robot and NLP problem
-    Im = 5e-4
-    robot = Bipedal_hybrid(Im, cfg)
+    robot = Bipedal_hybrid(cfg)
     nonlinearOptimization = nlp(robot, cfg)
     q, dq, ddq, u, t, gamma, m = nonlinearOptimization.solve_and_output(
-        robot, flag_save=save_flag, StorePath=StorePath)
+        robot, flag_save=save_flag, StorePath=save_dir, date = date)
     # endregion
     
     print("="*50)
     print("gamma:", gamma)
     print("="*50)
-    print("m:", m[0],m[1])
+    print("m:", m)
     print("="*50)
 
     # visulization
     if vis_flag:
+        params = {
+            'text.usetex': True,
+            'font.size': 15,
+            'axes.titlesize': 15,
+            'legend.fontsize': 15,
+            'axes.labelsize': 20,
+            'lines.linewidth': 3,
+            'xtick.labelsize': 15,
+            'ytick.labelsize': 15,
+            'axes.titlepad': 3.0,
+            'axes.labelpad': 3.0,
+            'lines.markersize': 8,
+            'figure.subplot.wspace': 0.4,
+            'figure.subplot.hspace': 0.8,
+        }
 
+        plt.rcParams.update(params)
+        vis = DataProcess(cfg, q, dq, ddq, u, t, gamma, m, save_dir, save_flag, date = date)
+        fig1 = vis.TrajPlot()
+
+        plt.show()
         pass
 
 if __name__ == "__main__":

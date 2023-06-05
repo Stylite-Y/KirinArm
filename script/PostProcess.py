@@ -1,51 +1,149 @@
-from cProfile import label
-from posixpath import dirname
-from re import I
+import os
+import time
+import pickle
+import datetime
 import numpy as np
 from numpy import sin  as s
 from numpy import cos as c
-import os
-import numpy
-import yaml
+from ruamel.yaml import YAML
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 from matplotlib.pyplot import MultipleLocator
-import time
-from ruamel.yaml import YAML
-import pickle
+
+
+class DynamicModel():
+    def __init__(self, cfg, mm=[1.5, 1.5], gam=[1.0, 1.0]):
+        self.Mass = list(cfg['Robot']['Mass']['mass'])
+        self.Inertia = list(cfg['Robot']['Mass']['inertia'])
+        self.massCenter = list(cfg['Robot']['Mass']['massCenter'])
+        self.GeoLength = list(cfg['Robot']['Geometry']['length'])
+        self.dof = len(self.GeoLength)
+
+        self.Mass.append(mm)
+        self.gam = gam
+
+        pass
+
+    def Posture(self, q):
+        L = self.GeoLength
+        posx = np.zeros(self.dof+1)
+        posy = np.zeros(self.dof+1)
+        for i in range(self.dof+1):
+            qj = 0
+            for j in range(i+1):
+                if j == 0:
+                    posx[i]=0
+                    posy[i]=0
+                else:
+                    qj += q[j-1]
+                    posx[i] += L[j-1]*s(qj)
+                    posy[i] += L[j-1]*c(qj)
+        
+        return posx, posy
 
 
 class DataProcess():
-    def __init__(self, cfg, robot,theta, q, dq, ddq, u, F, t, savepath,save_flag):
+    def __init__(self, cfg, q, dq, ddq, u, t, gamma, m, savepath, save_flag, OutputPath='./image/', **params):
         self.cfg = cfg
-        self.robot = robot
-        self.dt = robot.dt
-        # self.arm_M = arm_M
-        # self.arm_I = arm_I
-        self.theta = theta
         self.q = q
         self.dq = dq
         self.ddq = ddq
         self.u = u
-        # self.F = F
         self.t = t
+        self.m = m
+        self.gam = gamma
+        self.date = params['date']
         self.savepath = savepath
+        self.OutputPath = OutputPath
         self.save_flag = save_flag
+        self.GeoLength = list(cfg['Robot']['Geometry']['length'])
+        self.dof = len(self.GeoLength)
 
-        # self.ML = self.cfg["Optimization"]["MaxLoop"] / 1000
-        # self.Tp = self.cfg['Controller']['Tp']
-        # self.Nc = self.cfg['Controller']['Nc']
-        # self.T = self.cfg['Controller']['T']
-        # self.dt = self.cfg['Controller']['dt']
-        # self.PostarCoef = self.cfg["Optimization"]["CostCoef"]["postarCoef"]
-        # self.TorqueCoef = self.cfg["Optimization"]["CostCoef"]["torqueCoef"]
-        # self.DTorqueCoef = self.cfg["Optimization"]["CostCoef"]["DtorqueCoef"]
-        # self.VeltarCoef = cfg["Optimization"]["CostCoef"]["VeltarCoef"]
-        # self.m = cfg['Robot']['Mass']['mass']
-        # self.I = cfg['Robot']['Mass']['inertia']
+        # region plot
+        plt.style.use("science")
 
-        self.save_dir, self.name, self.date = self.DirCreate()
-        # self.Inertia_main, self.Inertia_coupling, self.Corialis, self.Gravity = self.ForceCal()
+        self.params = {
+            'text.usetex': True,
+            'font.size': 15,
+            'axes.titlesize': 15,
+            'legend.fontsize': 15,
+            'axes.labelsize': 15,
+            'lines.linewidth': 3,
+            'xtick.labelsize': 15,
+            'ytick.labelsize': 15,
+            'axes.titlepad': 3.0,
+            'axes.labelpad': 3.0,
+            'lines.markersize': 8,
+            'figure.subplot.wspace': 0.4,
+            'figure.subplot.hspace': 0.8,
+        }
+
+        plt.rcParams.update(self.params)
+        # endregion
+
+        # self.save_dir, self.name, self.date = self.DirCreate()
         pass
+
+    def TrajPlot(self):
+        cmap = mpl.cm.get_cmap('viridis')
+        fig = plt.figure(figsize=(18/2.54, 16/2.54))
+        # fig = plt.figure(figsize=(18, 16))
+        gs = fig.add_gridspec(2, 1, height_ratios=[1, 2.2], wspace=0.3, hspace=0.5)
+        g_data = gs[1].subgridspec(2, self.dof, wspace=0.3, hspace=0.6)
+        ax_m = fig.add_subplot(gs[0])
+        ax_v = [fig.add_subplot(g_data[0, i]) for i in range(self.dof)]
+        ax_u = [fig.add_subplot(g_data[1, i]) for i in range(self.dof)]
+
+        #! plot trajectory ------------------------------------------
+        ax_m.axhline(y=-0.0, color='k', zorder=0)
+        num_frame = 5
+        T = self.cfg["Controller"]["Period"]
+        
+        for tt in np.linspace(0, T, num_frame):
+            idx = np.argmin(np.abs(self.t-tt))
+            model = DynamicModel(self.cfg, self.m, self.gam)
+            posx, posy = model.Posture(self.q[idx, :])
+            for j in range(self.dof):
+                ax_m.plot([posx[j], posx[j+1]], [posy[j], posy[j+1]], 
+                        'o-', ms=1, color=cmap(tt/T), alpha=tt/T*0.8+0.2, lw=1)
+            pass
+
+        ax_m.axis('equal')
+        ax_m.text(-0.05, 1.1, r"$\mathbf{A}$",transform=ax_m.transAxes)
+        ax_m.set_xlabel('x (m)')
+        ax_m.set_ylabel('y (m)')
+
+        #! plot vel -------------------------------------------
+        titlelabel_v = [r"$\dot{\theta}_s\ (rad/s)$",r"$\dot{\theta}_e\ (rad/s)$"]
+        axislabel = ["t (s)","angular vel (rad/s)"]
+        index = [r"$\mathbf{B}$",r"$\mathbf{C}$"]
+        [ax_v[i].plot(self.t, self.dq[:, i], color='C0') for i in range(self.dof)]
+        [ax_v[i].set_title(titlelabel_v[i]) for i in range(self.dof)]
+        [ax_v[i].set_xlim([0,T]) for i in range(self.dof)]
+        ax_v[0].set_ylabel(axislabel[1])
+        [ax_v[i].text(-0.05,1.1,index[i],transform=ax_v[i].transAxes) for i in range(self.dof)]
+
+        #! plot force -------------------------------------------
+        titlelabel_u = [r"$\tau_s\ (Nm)$",r"$\tau_e\ (N.m)$"]
+        index = [r"$\mathbf{D}$",r"$\mathbf{E}$"]
+        axislabel = ["t (s)","torque (N.m)"]
+        ax_u[0].plot(self.t, self.u[:, 0], color='C0')
+        ax_u[1].plot(self.t, self.u[:, 1], color='C0')
+        [ax_u[i].set_title(titlelabel_u[i]) for i in range(self.dof)]
+        [ax_u[i].set_xlim([0,T]) for i in range(self.dof)]
+        [ax_u[i].set_xlabel(axislabel[0]) for i in range(self.dof)]
+        ax_u[0].set_ylabel(axislabel[1])
+        [ax_u[i].text(-0.05,1.1,index[i],transform=ax_u[i].transAxes) for i in range(self.dof)]
+
+        if self.save_flag:
+            todaytime=datetime.date.today()
+            savedir = self.OutputPath + str(todaytime) + '/'+self.date
+            if not os.path.isdir(savedir):
+                os.makedirs(savedir)
+            fig.savefig(savedir + "/traj_opt.png", dpi=600)
+        else:
+            return fig
+
 
     def DirCreate(self, method_choice=2):
         trackingCoeff = self.cfg["Optimization"]["CostCoeff"]["trackingCoeff"]
@@ -346,266 +444,15 @@ class DataProcess():
         # plt.show()
         
         pass
-    
 
-    def ForceCal(self):
-        robot = self.robot    # create robot
-        # calculate force
-        Inertia_main = []
-        Inertia_coupling = []
-        Corialis = []
-        Gravity = []
-        for i in range(len(self.t)):
-            temp1, temp2 = robot.inertia_force2(self.q[i, :], self.ddq[i, :])
-            Inertia_main.append(temp1)
-            Inertia_coupling.append(temp2)
-            Corialis.append(robot.Coriolis(self.q[i, :], self.dq[i, :]))
-            Gravity.append(robot.Gravity(self.q[i, :]))
-            if i ==0:
-                print(self.q[0], self.dq[0], self.ddq[0])
-                print(Inertia_main, Inertia_coupling, Corialis, Gravity)
-
-        Inertia_main = np.asarray(Inertia_main)
-        Inertia_coupling = np.asarray(Inertia_coupling)
-        Corialis = np.asarray(Corialis)
-        Gravity = np.asarray(Gravity)
-        return Inertia_main, Inertia_coupling, Corialis, Gravity
-
-    def ForceAnalysis(self, saveflag = 0):
-        Inertia_main, Inertia_coupling, Corialis, Gravity = self.Inertia_main, self.Inertia_coupling, self.Corialis, self.Gravity
-
-        temp = Inertia_main[0][0] + Inertia_coupling[0][0] + Corialis[0][0] + Gravity[0][0]
-        print(temp, Inertia_main[0][0], Inertia_coupling[0][0], Corialis[0][0], Gravity[0][0])
-        fig, axes = plt.subplots(3,1, dpi=100,figsize=(12,10))
-        ax1 = axes[0]
-        ax2 = axes[1]
-        ax3 = axes[2]
-        ax1.plot(self.t, Inertia_main[:, 0], label="Inertia_main")
-        ax1.plot(self.t, Inertia_coupling[:, 0], label="Inertia_coupling")
-        ax1.plot(self.t, Corialis[:, 0], label="Corialis")
-        ax1.plot(self.t, Gravity[:, 0], label="Gravity")
-
-        ax1.set_ylabel('Force ', fontsize = 15)
-        ax1.xaxis.set_tick_params(labelsize = 12)
-        ax1.yaxis.set_tick_params(labelsize = 12)
-        ax1.legend(loc='upper right', fontsize = 12)
-        ax1.grid()
-
-        ax2.plot(self.t, Inertia_main[:, 1], label="Inertia_main")
-        ax2.plot(self.t, Inertia_coupling[:, 1], label="Inertia_coupling")
-        ax2.plot(self.t, Corialis[:, 1], label="Corialis")
-        ax2.plot(self.t, Gravity[:, 1], label="Gravity")
-
-        ax2.set_ylabel('Force ', fontsize = 15)
-        ax2.xaxis.set_tick_params(labelsize = 12)
-        ax2.yaxis.set_tick_params(labelsize = 12)
-        ax2.legend(loc='upper right', fontsize = 12)
-        ax2.grid()
-
-        ax3.plot(self.t, Inertia_main[:, 2], label="Inertia_main")
-        ax3.plot(self.t, Inertia_coupling[:, 2], label="Inertia_coupling")
-        ax3.plot(self.t, Corialis[:, 2], label="Corialis")
-        ax3.plot(self.t, Gravity[:, 2], label="Gravity")
-
-        ax3.set_ylabel('Force ', fontsize = 15)
-        ax3.xaxis.set_tick_params(labelsize = 12)
-        ax3.yaxis.set_tick_params(labelsize = 12)
-        ax3.legend(loc='upper right', fontsize = 12)
-        ax3.grid()
-
-        date = self.date
-        name = self.name + "-Force.png"
-
-        savename = self.save_dir + date + name
-
-        if saveflag:
-            plt.savefig(savename)
-        plt.show()
-
-        pass
-
-    def PowerAnalysis(self, saveflag = 0):
-        Inertia_main, Inertia_coupling, Corialis, Gravity = self.Inertia_main, self.Inertia_coupling, self.Corialis, self.Gravity
-        power = np.asarray([self.u[:, i] * self.dq[:, i+1] for i in range(2)]).transpose()
-        dq = np.asarray(self.dq)
-        Inertia_main_p = Inertia_main * dq
-        Inertia_coupling_p = Inertia_coupling * dq
-        Corialis_p = Corialis * dq
-        Gravity_p = Gravity * dq
-        # print(power.shape)
-
-        fig, axes = plt.subplots(3,1, dpi=100,figsize=(12,10))
-        ax1 = axes[0]
-        ax2 = axes[1]
-        ax3 = axes[2]
-        ax1.plot(self.t, Inertia_main_p[:, 0], label="Joint 0 Inertia_main Power")
-        ax1.plot(self.t, Inertia_coupling_p[:, 0], label="Joint 0 Inertia_coupling Power")
-        ax1.plot(self.t, Corialis_p[:, 0], label="Joint 0 Corialis Power")
-        ax1.plot(self.t, Gravity_p[:, 0], label="Joint 0 Gravity Power")
-
-        ax1.set_ylabel('Power ', fontsize = 15)
-        ax1.xaxis.set_tick_params(labelsize = 12)
-        ax1.yaxis.set_tick_params(labelsize = 12)
-        ax1.legend(loc='upper right', fontsize = 12)
-        ax1.grid()
-
-        ax2.plot(self.t, power[:, 0], label="Joint 1 Torque Power")
-        ax2.plot(self.t, Inertia_main_p[:, 1], label="Joint 1 Inertia_main Power")
-        ax2.plot(self.t, Inertia_coupling_p[:, 1], label="Joint 1 Inertia_coupling Power")
-        ax2.plot(self.t, Corialis_p[:, 1], label="Joint 1 Corialis Power")
-        ax2.plot(self.t, Gravity_p[:, 1], label="Joint 1 Gravity Power")
-
-        ax2.set_ylabel('Power ', fontsize = 15)
-        ax2.xaxis.set_tick_params(labelsize = 12)
-        ax2.yaxis.set_tick_params(labelsize = 12)
-        ax2.legend(loc='upper right', fontsize = 12)
-        ax2.grid()
-
-        ax3.plot(self.t, power[:, 1], label="Joint 2 Torque Power")
-        ax3.plot(self.t, Inertia_main_p[:, 2], label="Joint 2 Inertia_main Power")
-        ax3.plot(self.t, Inertia_coupling_p[:, 2], label="Joint 2 Inertia_coupling Power")
-        ax3.plot(self.t, Corialis_p[:, 2], label="Joint 2 Corialis Power")
-        ax3.plot(self.t, Gravity_p[:, 2], label="Joint 2 Gravity Power")
-
-        ax3.set_ylabel('Power ', fontsize = 15)
-        ax3.xaxis.set_tick_params(labelsize = 12)
-        ax3.yaxis.set_tick_params(labelsize = 12)
-        ax3.legend(loc='upper right', fontsize = 12)
-        ax3.grid()
-
-        date = self.date
-        name = self.name + "-Power.png"
-
-        savename = self.save_dir + date + name
-
-        if saveflag:
-            plt.savefig(savename)
-        # plt.show()
-        pass
-
-    def MomentumAnalysis(self,saveflag=0):
-        from numpy import sin, cos
-
-        L0 = self.robot.L[0]
-        L1 = self.robot.L[1]
-        L2 = self.robot.L[2]
-        l0 = self.robot.l[0]
-        l1 = self.robot.l[1]
-        l2 = self.robot.l[2]
-        I0 = self.robot.I[0]
-        I1 = self.robot.I[1]
-        I2 = self.robot.I[2]
-        m0 = self.robot.m[0]
-        m1 = self.robot.m[1]
-        m2 = self.robot.m[2]
-        q = self.q
-        dq = self.dq
-        
-        vx0 = l0*cos(q[:, 0])*dq[:, 0]
-        vy0 = -l0*sin(q[:, 0])*dq[:, 0]
-        vx1 = L0*cos(q[:, 0])*dq[:, 0] + l1*cos(q[:, 0]+q[:, 1])*(dq[:, 0]+dq[:, 1])
-        vy1 = -L0*sin(q[:, 0])*dq[:, 0] - l1*sin(q[:, 0]+q[:, 1])*(dq[:, 0]+dq[:, 1])
-        vx2 = L0*cos(q[:, 0])*dq[:, 0] + L1*cos(q[:, 0]+q[:, 1])*(dq[:, 0]+dq[:, 1]) + l2*cos(q[:, 0]+q[:, 1]+q[:, 2])*(dq[:, 0]+dq[:, 1]+dq[:, 2])
-        vy2 = -L0*sin(q[:, 0])*dq[:, 0] - L1*sin(q[:, 0]+q[:, 1])*(dq[:, 0]+dq[:, 1]) - l2*sin(q[:, 0]+q[:, 1]+q[:, 2])*(dq[:, 0]+dq[:, 1]+dq[:, 2])
-
-        Momentum0=np.array([[0.0]])
-        Momentum1=np.array([[0.0]])
-        Momentum2=np.array([[0.0]])
-        for i in range(len(self.t)-1):
-            if i ==0:
-                dv0 = np.sqrt(vx0[i+1]**2 + vy0[i+1]**2)*vx0[i+1]/np.abs(vx0[i+1]) - 0.0
-                dv1 = np.sqrt(vx1[i+1]**2 + vy1[i+1]**2)*vx1[i+1]/np.abs(vx1[i+1]) - 0.0
-                dv2 = np.sqrt(vx2[i+1]**2 + vy2[i+1]**2)*vx2[i+1]/np.abs(vx2[i+1]) - 0.0
-            else:
-                dv0 = np.sqrt(vx0[i+1]**2 + vy0[i+1]**2)*vx0[i+1]/np.abs(vx0[i+1]) - np.sqrt(vx0[i]**2 + vy0[i]**2)*vx0[i]/np.abs(vx0[i])
-                dv1 = np.sqrt(vx1[i+1]**2 + vy1[i+1]**2)*vx1[i+1]/np.abs(vx1[i+1]) - np.sqrt(vx1[i]**2 + vy1[i]**2)*vx1[i]/np.abs(vx1[i])
-                dv2 = np.sqrt(vx2[i+1]**2 + vy2[i+1]**2)*vx2[i+1]/np.abs(vx2[i+1]) - np.sqrt(vx2[i]**2 + vy2[i]**2)*vx2[i]/np.abs(vx2[i])
-            temp0 = m0*dv0 + I0 * (dq[i+1][0]-dq[i][0])
-            temp1 = m1*dv1 + I1 * (dq[i+1][1]-dq[i][1])
-            temp2 = m2*dv2 + I2 * (dq[i+1][2]-dq[i][2])
-            Momentum0 = np.concatenate([Momentum0, [[temp0]]], axis=0)
-            Momentum1 = np.concatenate([Momentum1, [[temp1]]], axis=0)
-            Momentum2 = np.concatenate([Momentum2, [[temp2]]], axis=0)
-            
-        Momentum0 = Momentum0[1:,]
-        Momentum1 = Momentum1[1:,]
-        Momentum2 = Momentum2[1:,]
-        Impulse = self.u * self.dt
-        Impulse = Impulse[0:len(Momentum0),]
-        MomentumSum = Momentum0+Momentum1+Momentum2
-        MomentumSum2 = Momentum0+Momentum1+Momentum2-Impulse[:,0].reshape(-1, 1)-Impulse[:,1].reshape(-1, 1)
-        print(Momentum0.shape, Impulse.shape, Impulse[:,0].shape)
-
-        ## test
-        temp = vx0[1]*m0 + vx1[1]*m1 + vx2[1]*m2
-        print(q[1], dq[1], temp, Momentum0[1], Impulse[0], self.u[0])
-
-        fig, axes = plt.subplots(1,1, dpi=100,figsize=(12,10))
-        axes.plot(self.t[0:len(Momentum0)], Momentum0, label="link 0 Momentum")
-        axes.plot(self.t[0:len(Momentum0)], Momentum1, label="link 1 Momentum")
-        axes.plot(self.t[0:len(Momentum0)], Momentum2, label="link 2 Momentum")
-        # axes.plot(self.t[0:len(Momentum0)], MomentumSum, label="Sum of all link Momentum")
-        # axes.plot(self.t[0:len(Momentum0)], MomentumSum2, label="Sum of Momentum and Impulse")
-        # axes.plot(self.t, Impulse[:,0], label="joint 1 Impulse")
-        # axes.plot(self.t, Impulse[:,1], label="joint 2 Impulse")
-
-        axes.set_ylabel('Momentum ', fontsize = 15)
-        axes.xaxis.set_tick_params(labelsize = 12)
-        axes.yaxis.set_tick_params(labelsize = 12)
-        axes.legend(loc='upper right', fontsize = 12)
-        axes.grid()
-
-        date = self.date
-        name = self.name + "-Momentum.png"
-
-        savename = self.save_dir + date + name
-
-        if saveflag:
-            plt.savefig(savename)
-        # plt.show()
-        pass
-
-    def SupportForce(self, saveflag=0):
-        Arm = self.robot
-        Fx = []
-        Fy = []
-        print(len(self.t))
-        for i in range(len(self.t)-1):
-            AccF = Arm.SupportForce(self.q[i, :], self.dq[i, :], self.ddq[i, :])
-            Fx.append(-AccF[0])
-            Fy.append(-AccF[1])
-        temp = self.t[0:len(self.t)-1]
-        plt.figure()
-        plt.plot(temp, Fx, label="Fx")
-        plt.plot(temp, Fy, label="Fy")
-        plt.legend(loc='upper right', fontsize = 12)
-        plt.grid()
-        date = self.date
-        name = self.name + "-sF.png"
-
-        savename = self.save_dir + date + name
-
-        if saveflag:
-            plt.savefig(savename)
-        plt.show()
-
-        pass
-
-    def DataSave(self, saveflag, com_x, com_y, W_k, W_w, P_k, P_w, I_k, I_w, I_s, I_e):
+    def DataSave(self, saveflag):
         date = self.date
         name = self.name
 
         if saveflag:
-            # np.save(self.save_dir+date+name+"-sol.npy",
-            #         np.hstack((self.q, self.dq, self.ddq, self.u, self.F, self.t)))
-            # # output the config yaml file
-            # # with open(os.path.join(StorePath, date + name+"-config.yaml"), 'wb') as file:
-            # #     yaml.dump(self.cfg, file)
             with open(self.save_dir+date+name+"-config.yaml", mode='w') as file:
                 YAML().dump(self.cfg, file)
-            # Data = {'F': self.F, 'u': self.u, "q": self.q, "dq": self.dq, "ddq": self.ddq, "t": self.t}
-            Data = {'u': self.u, "q": self.q, "dq": self.dq, "ddq": self.ddq, "t": self.t, "com_x": com_x, "com_y": com_y,\
-                    "W_k":W_k, "W_w":W_w, "P_k":P_k, "P_w":P_w,"I_k":I_k, "I_w":I_w, "I_s":I_s, "I_e":I_e}
+            Data = {'u': self.u, "q": self.q, "dq": self.dq, "ddq": self.ddq, "t": self.t}
             with open(os.path.join(self.save_dir, date+name+"-sol.pkl"), 'wb') as f:
                 pickle.dump(Data, f)
             pass

@@ -3,10 +3,10 @@ Optimization:
   RandomSeed: 1
 
   CostCoeff:
-    trackingCoeff: 0.3
+    trackingCoeff: 0.6
     VelCoeff: 0.0
-    powerCoeff: 0.6
-    forceCoeff: 0.0
+    powerCoeff: 0.1
+    forceCoeff: 0.2
     smoothCoeff: 0.1
     ImpactCoeff: 0.0
 
@@ -17,7 +17,7 @@ Environment:
 
 Controller:
   Target: 5
-  Period: 0.1
+  Period: 2
   dt: 0.001
   CollectionNum: 500
   
@@ -36,12 +36,14 @@ Ref:
 
 Robot:
   Mass:
+    mass: []
+    inertia: []
     massCenter: [0.175, 0.175]
   Geometry:
-    L1: 0.35
-    L2: 0.35
+    length: [0.35, 0.35]
   damping: 0.0
   Motor:
+    Inertia: 0.0005
     MaxTorque: 36
     MaxSpeed: 54
     CriticalSpeed: 30

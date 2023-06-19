@@ -1,1 +1,2 @@
-l
+
+    def get_compos(self, q):

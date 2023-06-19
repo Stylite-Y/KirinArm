@@ -168,9 +168,6 @@ ENV/
 env.bak/
 venv.bak/
 
-# data file
-/data/
-
 # Spyder project settings
 .spyderproject
 .spyproject
@@ -189,12 +186,3 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-# data file
-data/
-.npy
-.pkl
-.calc
-.xml
-.raw
-.bvh
-.mp4

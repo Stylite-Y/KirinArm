@@ -3,12 +3,17 @@
         - 羽毛球二连杆模型: 基于角动量最大化优化机械臂参数
 2. 2023.06.05:
         - 羽毛球模型修正为三连杆: 基于角动量最大化优化机械臂参数
+3. 2023.06.09:
+        - 加入电机库参数，优化电机需求:同参数循环载入电机参数
+4. 2023.06.17:
+        - 加入电机库参数，优化电机需求: 不同电机参数单独设置参数        
 '''
 
 import os
 import yaml
 import datetime
 import pickle
+import pandas as pd
 import casadi as ca
 from casadi import sin as s
 from casadi import cos as c
@@ -20,12 +25,16 @@ from PostProcess import DataProcess
 
 
 class Bipedal_hybrid():
-    def __init__(self, cfg):
+    def __init__(self, cfg, motor):
         self.opti = ca.Opti()
+        # motor params: Im, mt, ms, cs
+        self.Im = motor["Im"]
+        self.motor_cs = motor["cs"]
+        self.motor_ms = motor["ms"]
+        self.motor_mt = motor["mt"]
 
         # time and collection defination related parameter
         self.T = cfg['Controller']['Period']
-        self.Im = cfg['Robot']['Motor']['Inertia']
         self.N = cfg['Controller']['CollectionNum']
         self.dt = self.T / self.N
 
@@ -35,10 +44,13 @@ class Bipedal_hybrid():
         self.H_tar = cfg['Ref']['H_tar']
         self.V_tar = cfg['Ref']['V_tar']
 
-        # motor parameter
-        self.motor_cs = cfg['Robot']['Motor']['CriticalSpeed']
-        self.motor_ms = cfg['Robot']['Motor']['MaxSpeed']
-        self.motor_mt = cfg['Robot']['Motor']['MaxTorque']
+        print("="*50)
+        print("Im: ", self.Im)
+        print("mt: ", self.motor_mt)
+        print("ms: ", self.motor_ms)
+        print("H_tar:", self.H_tar)
+        print("V_tar:", self.V_tar)
+        print("="*50)
 
         # evironemnt parameter
         self.mu = cfg['Environment']['Friction_Coeff']
@@ -277,9 +289,10 @@ class Bipedal_hybrid():
 
 
 class nlp():
-    def __init__(self, robot, cfg, armflag = True):
+    def __init__(self, robot, cfg, motor_id=0, armflag = True):
         # load parameter
         self.cfg = cfg
+        self.motor_id = motor_id
         self.armflag = armflag
         self.T = cfg['Controller']['Period']
         self.MomtCoeff = cfg["Optimization"]["CostCoeff"]["MomtCoeff"]
@@ -312,7 +325,7 @@ class nlp():
         init(robot.m[0], 2.0)
         init(robot.m[1], 2.0)
         # endregion
-        theta_r, _, _ = nlp.RefTraj(robot.N, robot.dt)
+        theta_r = nlp.RefTraj(robot.N, robot.dt)
         vel_r = []
         for i in range(robot.dof):
             vel_r.append([theta_r[i][j+1] - theta_r[i][j] for j in range(robot.N-1)])
@@ -336,11 +349,10 @@ class nlp():
         smooth = 0
         MomtTar=0
 
-        H_m = robot.H_tar
+        H_m = robot.H_tar[self.motor_id]
         Ve_m = robot.V_tar
         P_tar = [0.05*np.pi, -0.01*np.pi, 0.01*np.pi]
         q_m = robot.q_m
-        # q_m = [np.pi,np.pi, np.pi]
         # endregion
         
         for i in range(robot.N):
@@ -363,21 +375,20 @@ class nlp():
             MomtTar += -(Hi/H_m)**2 * robot.dt
             # VelTar += (ve/Ve_m - 1)**2 * robot.dt
             # VelTar += -((vei)/(Ve_m)**2) * robot.dt
-            VelTar += -(vei)/(Ve_m)**2 * robot.dt
+            VelTar += ((vei)/(Ve_m)**2 - 1)**2 * robot.dt
 
             for k in range(robot.dof):
                 power += ((robot.dq[i][k]*robot.u[i][k]) / (robot.motor_ms*robot.motor_mt))**2 * robot.dt
                 force += (robot.u[i][k] / robot.u_UB[k])**2 * robot.dt
-                PosTar += ((robot.q[i][k] - P_tar[k])/q_m[k])**2*robot.dt
+                PosTar += ((robot.q[i][k] - P_tar[k])/q_m[k])**2*robot.dt * 1
 
         # Final state costfun
         # VelTar += (ve/Ve_m - 1)**2
         # VelTar += -((vei)/(Ve_m)**2)
-        VelTar += -(vei)/(Ve_m)**2
+        VelTar += ((vei)/(Ve_m)**2 - 1)**2
         MomtTar += -(Hi/H_m)**2
         for i in range(robot.dof):
             PosTar += ((robot.q[-1][i] - P_tar[i])/q_m[k])**2 * 1.2
-            # PosTar += ((robot.q[-1][i] - P_tar[i])/q_m[k])**2
 
         for i in range(robot.N-1):
             for k in range(robot.dof):
@@ -462,18 +473,17 @@ class nlp():
         ceq.extend([robot.dq[0][0]==0])
         ceq.extend([robot.dq[0][1]==0])
         ceq.extend([robot.dq[0][2]==0])
-        # ceq.extend([robot.dq[-1][2]>=0])
 
         # region smooth constraint
         for j in range(len(robot.u)-1):
             ceq.extend([(robot.u[j][k]-robot.u
-                        [j+1][k])**2 <= 100 for k in range(robot.dof)])
+                        [j+1][k])**2 <= 50 for k in range(robot.dof)])
             pass
         # endregion
 
         return ceq
 
-    def solve_and_output(self, robot, flag_save=True, StorePath="./", **params):
+    def solve_and_output(self, robot, motor_id, flag_save=True, StorePath="./", **params):
         # solve the nlp and stroge the solution
         q = []
         dq = []
@@ -535,12 +545,13 @@ class nlp():
             if flag_save:
                 # datename initial
                 date = params['date']
-                dirname = "-Traj-Mtf_"+str(self.MomtCoeff)+"-Pf_"+str(self.PosCoeff)+"-Vf_"+str(self.VelCoeff)+\
+                dirname = "-Mtf_"+str(self.MomtCoeff)+"-Pf_"+str(self.PosCoeff)+"-Vf_"+str(self.VelCoeff)+\
                         "-Wf_"+str(self.PowerCoeff)+"-Ff_"+str(self.ForceCoeff)+"-Sf_"+str(self.SmoothCoeff)+\
                         "-T_"+str(self.T)
-                dirname2 = "Motor_1"
-                # save_dir = StorePath + date + dirname+ "/"+ dirname2+ "/"
-                save_dir = StorePath + date + dirname+ dirname2+ "/"
+                dirname2 = "Motor_"+ str(motor_id)
+                save_dir = StorePath + date + dirname+ "/"+ dirname2+ "/"
+                # save_dir = StorePath + date + dirname+ dirname2+ "/"
+
                 if not os.path.isdir(save_dir):
                     os.makedirs(save_dir)
 
@@ -555,59 +566,29 @@ class nlp():
     @staticmethod
     def RefTraj(N, dt):
         # Cs = [5.851e5, -1.262e5, 8662, -218.2, 12.75, -0.3481]
-        # Cs = [-285.1, 6.626, 11.66, -0.3542]
         Cs = [-1.886e10, 6.99e9, -1.034e9, 7.82e7, -3.215e6, 7.0e4, -697.7, 12.92, -0.3441]
         Ce = [-1.521e6, 3.045e5, -2.012e4, 703.1, 0.2709, -2.809]
-        # Cs = [-7.367e7, 5.46e7, -1.616e7, 2.444e6, -2.01e5, 8751, -174.4, 6.462, -0.3441]
-        # Ce = [-4.753e5, 1.903e4, -2515, 175.8, 0.1355, -2.809]
-        Cw = [np.pi, -0.2*np.pi]
-        # Cw = [20*np.pi, -0.2*np.pi]
+        # Cw = [np.pi, -0.2*np.pi]
+        Cw = [20*np.pi, -0.2*np.pi]
 
         theta_s = []
         theta_e = []
         theta_w = []
-        dtheta_s = []
-        dtheta_e = []
-        dtheta_w = []
-        ddtheta_s = []
-        ddtheta_e = []
-        ddtheta_w = []
         for i in range(N):
             tt = i * dt
             theta_sm = Cs[0]*tt**8 + Cs[1]*tt**7 + Cs[2]*tt**6 + Cs[3]*tt**5 + \
                     Cs[4]*tt**4 + Cs[5]*tt**3 + Cs[6]*tt**2 + Cs[7]*tt**1 + Cs[8]
-            # theta_sm = Cs[0]*tt**3 + Cs[1]*tt**2 + Cs[2]*tt**1 + Cs[3]
             theta_em = Ce[0]*tt**5 + Ce[1]*tt**4 + Ce[2]*tt**3 + Ce[3]*tt**2 + \
                     Ce[4]*tt**1 + Ce[5]
             theta_wm = Cw[0]*tt**2 + Cw[1]
-
-            dtheta_sm = 8*Cs[0]*tt**7 + 7*Cs[1]*tt**6 + 6*Cs[2]*tt**5 +5*Cs[3]*tt**4 + \
-                    4*Cs[4]*tt**3 + 3*Cs[5]*tt**2 + 2*Cs[6]*tt**1 + Cs[7]
-            dtheta_em = 5*Ce[0]*tt**4 + 4*Ce[1]*tt**3 + 3*Ce[2]*tt**2 + 2*Ce[3]*tt**1 + \
-                    Ce[4]
-            dtheta_wm = 2*Cw[0]*tt
-
-            ddtheta_sm = 8*7*Cs[0]*tt**6 + 7*6*Cs[1]*tt**5 + 6*5*Cs[2]*tt**4 + 5*4*Cs[3]*tt**3 + \
-                    4*3*Cs[4]*tt**2 + 3*2*Cs[5]*tt**1 + 2*1*Cs[6]
-            ddtheta_em = 5*4*Ce[0]*tt**3 + 4*3*Ce[1]*tt**2 + 3*2*Ce[2]*tt**1 + 2*1*Ce[3]
-            ddtheta_wm = 2*Cw[0]
             
             theta_s.append(theta_sm)
             theta_e.append(theta_em)
             theta_w.append(theta_wm)
-
-            dtheta_s.append(dtheta_sm)
-            dtheta_e.append(dtheta_em)
-            dtheta_w.append(dtheta_wm)
-            ddtheta_s.append(ddtheta_sm)
-            ddtheta_e.append(ddtheta_em)
-            ddtheta_w.append(ddtheta_wm)
             pass
 
         theta_ref = [theta_s, theta_e, theta_w]
-        dtheta_ref = [dtheta_s, dtheta_e, dtheta_w]
-        ddtheta_ref = [ddtheta_s, ddtheta_e, ddtheta_w]
-        return theta_ref, dtheta_ref, ddtheta_ref
+        return theta_ref
         pass
 
 class ParamsCal():
@@ -674,7 +655,7 @@ class ParamsCal():
     def get_AngMomt(self):
         pass
 
-    def get_costfun(self, cfg, q, dq, u, m, gam, I):
+    def get_costfun(self, cfg, q, dq, u, m, gam, I, motor_id=0):
         T = cfg['Controller']['Period']
         N = cfg['Controller']['CollectionNum']
         dt = T / N
@@ -707,7 +688,7 @@ class ParamsCal():
         MomtTar=0
         MomtTar2=0
 
-        H_m = H_tar
+        H_m = H_tar[motor_id]
         Ve_m = V_tar
         P_tar = [0.05*np.pi, -0.01*np.pi, 0.01*np.pi]
         # endregion
@@ -754,12 +735,12 @@ class ParamsCal():
             # state process costfun
             MomtTar += -(Hi/H_m)**2 * dt
             # VelTar += -((vei)/(Ve_m)**2) * dt
-            VelTar += -((vei)/(Ve_m)**2) * dt
+            VelTar += ((vei)/(Ve_m)**2 - 1)**2 * dt
 
             for k in range(self.dof):
                 power += ((dq[i][k]*u[i][k]) / (motor_ms*motor_mt))**2 * dt
                 force += (u[i][k] / u_UB[k])**2 * dt
-                PosTar += ((q[i][k] - P_tar[k])/q_UB[k])**2*dt
+                PosTar += ((q[i][k] - P_tar[k])/q_UB[k])**2*dt 
 
             Pw.append(power)
             F.append(force)
@@ -769,12 +750,12 @@ class ParamsCal():
 
         # Final state costfun
         # VelTar += -((vei)/(Ve_m)**2)
-        VelTar2 += -((vei)/(Ve_m)**2)
-        VelTar += -((vei)/(Ve_m)**2)
-        MomtTar2 += -(Hi/H_m)**2
+        VelTar2 += ((vei)/(Ve_m)**2 - 1)**2
+        VelTar += ((vei)/(Ve_m)**2 - 1)**2
+        MomtTar2 += -(Hi/H_m)**2 
         for i in range(self.dof):
-            # PosTar2 += ((q[-1][i] - P_tar[i])/q_UB[k])**2 * 1.2
-            PosTar2 += ((q[-1][i] - P_tar[i])/q_UB[k])**2
+            PosTar2 += ((q[-1][i] - P_tar[i])/q_UB[k])**2 * 1.2
+            # PosTar2 += ((q[-1][i] - P_tar[i])/q_UB[k])**2 * 1
 
         Pos[-1] = PosTar2
         Vel[-1] = VelTar
@@ -804,6 +785,141 @@ class ParamsCal():
 
         return CostFun, [Vxx, Vyy], [Hm, HI], CostF
 
+    def get_costfun2(self, cfg, motor, q, dq, u, m, gam, I, motor_id=0):
+        T = cfg['Controller']['Period']
+        N = cfg['Controller']['CollectionNum']
+        dt = T / N
+        L = self.L
+
+        # motor parameter
+        motor_ms = motor['ms']
+        motor_mt = motor['mt']
+        H_tar = cfg['Ref']['H_tar']
+        V_tar = cfg['Ref']['V_tar']
+
+
+        u_UB = [motor_mt * gam[0], motor_mt * gam[1], motor_mt * gam[2]]
+        q_UB = [np.pi/2, np.pi, 0.3*np.pi]
+
+        MomtCoeff = cfg["Optimization"]["CostCoeff"]["MomtCoeff"]
+        VelCoeff = cfg["Optimization"]["CostCoeff"]["VelCoeff"]
+        PowerCoeff = cfg["Optimization"]["CostCoeff"]["PowerCoeff"]
+        ForceCoeff = cfg["Optimization"]["CostCoeff"]["ForceCoeff"]
+        SmoothCoeff = cfg["Optimization"]["CostCoeff"]["SmoothCoeff"]
+        PosCoeff = cfg["Optimization"]["CostCoeff"]["PosCoeff"]
+        # region aim function of optimal control
+        power = 0
+        force = 0
+        VelTar = 0
+        VelTar2 = 0
+        PosTar = 0
+        PosTar2 = 0
+        smooth = 0
+        MomtTar=0
+        MomtTar2=0
+
+        H_m = H_tar[motor_id]
+        Ve_m = V_tar
+        P_tar = [0.05*np.pi, -0.01*np.pi, 0.01*np.pi]
+        # endregion
+
+        Hm = []
+        HI = []
+        Vxx = []
+        Vyy = []
+        
+        Pw = []
+        F = []
+        Vel = []
+        Pos = []
+        Momt = []
+        V_end = []
+        Lam = []
+        
+        for i in range(N):
+            # font vel cal
+            vxi, vyi = self.get_endvel(q[i], dq[i])
+            vei = vxi**2 + vyi**2
+            vi = np.sqrt(vei)
+
+            Vxx.append([L[0]*np.cos(q[i][0])*dq[i][0], 
+                        L[1]*np.cos(q[i][0]+q[i][1])*(dq[i][0]+dq[i][1]),
+                        L[2]*np.cos(q[i][0]+q[i][1]+q[i][2])*(dq[i][0]+dq[i][1]+dq[i][2])])
+            Vyy.append([-L[0]*np.sin(q[i][0])*dq[i][0], 
+                        -L[1]*np.sin(q[i][0]+q[i][1])*(dq[i][0]+dq[i][1]),
+                        -L[2]*np.sin(q[i][0]+q[i][1]+q[i][2])*(dq[i][0]+dq[i][1]+dq[i][2])])
+
+            # angular momt cal
+            ri = self.get_compos(q[i])
+            v = self.get_comvel(q[i], dq[i])
+
+            # for j in range(robot.dof):
+            #     Hi += robot.m[j]*(ri[0][0]*v[0][1]-ri[0][1]*v[0][0]) + robot.I[i]*robot.dq[i][0]
+            Hi = m[0]*(ri[0][0]*v[0][1]-ri[0][1]*v[0][0]) + I[0]*dq[i][0] + \
+                 m[1]*(ri[1][0]*v[1][1]-ri[1][1]*v[1][0]) + I[1]*(dq[i][0]+dq[i][1]) +\
+                 m[2]*(ri[2][0]*v[2][1]-ri[2][1]*v[2][0]) + I[2]*(dq[i][0]+dq[i][1]+dq[i][2])
+            
+            Hm.append([m[0]*(ri[0][0]*v[0][1]-ri[0][1]*v[0][0]), 
+                        m[1]*(ri[1][0]*v[1][1]-ri[1][1]*v[1][0]),
+                        m[2]*(ri[2][0]*v[2][1]-ri[2][1]*v[2][0])])
+
+            HI.append([I[0]*dq[i][0], I[1]*(dq[i][0]+dq[i][1]), I[2]*(dq[i][0]+dq[i][1]+dq[i][2])])
+            
+            # state process costfun
+            MomtTar += -(Hi/H_m)**2 * dt
+            # VelTar += -((vei)/(Ve_m)**2) * dt
+            VelTar += ((vei)/(Ve_m)**2 - 1)**2 * dt
+
+            for k in range(self.dof):
+                power += ((dq[i][k]*u[i][k]) / (motor_ms*motor_mt))**2 * dt
+                force += (u[i][k] / u_UB[k])**2 * dt
+                PosTar += ((q[i][k] - P_tar[k])/q_UB[k])**2*dt 
+
+            Pw.append(power)
+            F.append(force)
+            Pos.append(PosTar)
+            Vel.append(VelTar)
+            Momt.append(MomtTar)
+            V_end.append(vi)
+            Lam.append(Hi)
+
+        # Final state costfun
+        # VelTar += -((vei)/(Ve_m)**2)
+        VelTar2 += ((vei)/(Ve_m)**2 - 1)**2
+        VelTar += ((vei)/(Ve_m)**2 - 1)**2
+        MomtTar2 += -(Hi/H_m)**2 
+        for i in range(self.dof):
+            PosTar2 += ((q[-1][i] - P_tar[i])/q_UB[k])**2 * 1.2
+            # PosTar2 += ((q[-1][i] - P_tar[i])/q_UB[k])**2 * 1
+
+        Pos[-1] = PosTar2
+        Vel[-1] = VelTar
+        Momt[-1] = MomtTar2
+
+        PosTar = PosTar * PosCoeff
+        PosTar2 = PosTar2 * PosCoeff
+        MomtTar = MomtTar * MomtCoeff
+        MomtTar2 = MomtTar2 * MomtCoeff 
+        VelTar = VelTar * VelCoeff
+        VelTar2 = VelTar2 * VelCoeff
+        power = power * PowerCoeff
+        force = force * ForceCoeff
+
+        Pw = np.asarray(Pw)
+        F = np.asarray(F)
+        Pos = np.asarray(Pos)
+        Vel = np.asarray(Vel)
+        Momt = np.asarray(Momt)
+
+        # AllCost = Pw * PowerCoeff
+        AllCost = Pw * PowerCoeff+ F * ForceCoeff+ Pos * PosCoeff+ Vel * VelCoeff+Momt * MomtCoeff
+
+        CostF = [AllCost, Pw * PowerCoeff, F * ForceCoeff, Pos * PosCoeff, Vel * VelCoeff, Momt * MomtCoeff]
+
+        CostFun = [PosTar, PosTar2, MomtTar, MomtTar2, VelTar, VelTar2, power, force]
+
+        return CostFun, [Vxx, Vyy], [Hm, HI], Lam, V_end
+
 
 def main():
     # region optimization trajectory for bipedal hybrid robot system
@@ -823,18 +939,35 @@ def main():
 
     # region load config file
     ParamFilePath = StorePath + "/config/ManiDesign.yaml"
+    # MotorFilePath = StorePath + "/config/MotorParams.xlsx"
+    MotorFilePath = StorePath + "/config/MotorParams_simple.xlsx"
     ParamFile = open(ParamFilePath, "r", encoding="utf-8")
     cfg = yaml.load(ParamFile, Loader=yaml.FullLoader)
+
+    MotorParam = pd.read_excel(MotorFilePath, header=4, index_col=0)
+    # MotorParam = pd.read_excel(MotorFilePath, header=4, index_col=0, nrows=4)
+    # print(MotorParam)
+    MotorData = MotorParam.values
+    MotorData = MotorData[:, 1:9]
+    MoterNum = len(MotorData)
     # endregion
 
     # region create robot and NLP problem
-    robot = Bipedal_hybrid(cfg)
-    nonlinearOptimization = nlp(robot, cfg)
-    q, dq, ddq, u, t, gamma, m = nonlinearOptimization.solve_and_output(
-        robot, flag_save=save_flag, StorePath=save_dir, date = date)
-    
+    i = 0
+    motor = {"Im": MotorData[i, 0], "cs": MotorData[i, 3], 
+            "ms": MotorData[i, 2], "mt": MotorData[i, 4]}
+    # print(motor)
     print("="*50)
-    print("gamma:", gamma)
+    print("MotorId:", i)
+    print("motor Params: ", motor)
+    print("="*50)
+    robot = Bipedal_hybrid(cfg, motor)
+    nonlinearOptimization = nlp(robot, cfg)
+    q, dq, ddq, u, t, gam, m = nonlinearOptimization.solve_and_output(
+        robot, i, flag_save=save_flag, StorePath=save_dir, date = date)
+        
+    print("="*50)
+    print("gamma:", gam)
     print("="*50)
     print("m:", m)
     print("="*50)
@@ -877,7 +1010,7 @@ def main():
     # endregion
 
     # region: costfun cal
-    CostFun, Vend, Hmt, CostF = Params.get_costfun(cfg, q, dq, u, mm, gamma, I)
+    CostFun, Vend, Hmt, CostF = Params.get_costfun(cfg, q, dq, u, mm, gam, I)
     print("CostFun Component")
     print("-"*50)
     print("Position process cost: ", CostFun[0])
@@ -889,13 +1022,7 @@ def main():
     print("Power process cost: ", CostFun[6])
     print("Force process cost: ", CostFun[7])
     print("="*50)
-    # print(Vend[0][300][2], Hmt[0][200][1])
     # endregion
-
-    # region: acc cal
-    theta_r, dtheta_r, ddtheta_r = nlp.RefTraj(robot.N, robot.dt)
-    # endregion
-    
 
     # region: visulization
     if vis_flag:
@@ -916,19 +1043,139 @@ def main():
         }
 
         plt.rcParams.update(params)
-        vis = DataProcess(cfg, q, dq, ddq, u, t, gamma, m, save_dir, save_flag, date = date)
+        vis = DataProcess(cfg, q, dq, ddq, u, t, gam, m, save_dir, save_flag, date = date)
+        # fig1 = vis.MultiMotorParams(Lam=Lam, EndVel=EndVel, MoterNum=MoterNum)
+        # fig3 = vis.VelAndMomtAnlysis(Vend=Vend, H=Hmt)
         fig1 = vis.TrajPlot()
         fig2 = vis.ParamsCalAndPlot(Lam=Lam, EndVel=EndVel)
         fig3 = vis.VelAndMomtAnlysis(Vend=Vend, H=Hmt)
         # fig4 = vis.AccRefCmp(dq_r=dtheta_r, ddq_r=ddtheta_r)
-        fig5 = vis.ForceComponentAnalysis(m=mm, gam=gamma)
-        fig6 = vis.CostFun(CostFun = CostF)
+        fig5 = vis.ForceComponentAnalysis(m=mm, gam=gam)
+        # fig6 = vis.CostFun(CostFun = CostF)
         ani = vis.animation()
 
         # plt.show()
         pass
     # endregion
 
+def main2():
+    # region optimization trajectory for bipedal hybrid robot system
+    vis_flag = True
+    save_flag = True
+    # endregion
+
+    # region: filepath
+    StorePath = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    todaytime=datetime.date.today()
+    date = time.strftime("%Y-%m-%d-%H-%M-%S")
+    ani_path = StorePath + "/data/animation/"
+    save_dir = StorePath + "/data/" + str(todaytime) + "/"
+    if not os.path.isdir(save_dir):
+        os.makedirs(save_dir)
+    # endregion
+
+    # region load config file
+    ParamFilePath = StorePath + "/config/ManiDesign_motor.yaml"
+    # MotorFilePath = StorePath + "/config/MotorParams.xlsx"
+    MotorFilePath = StorePath + "/config/MotorParams_simple.xlsx"
+    ParamFile = open(ParamFilePath, "r", encoding="utf-8")
+    cfg = yaml.load(ParamFile, Loader=yaml.FullLoader)
+
+    MotorParam = pd.read_excel(MotorFilePath, header=4, index_col=0)
+    # MotorParam = pd.read_excel(MotorFilePath, header=4, index_col=0, nrows=4)
+    # print(MotorParam)
+    MotorData = MotorParam.values
+    MotorData = MotorData[:, 1:9]
+    MoterNum = len(MotorData)
+    print(MotorData)
+    # endregion
+
+    # region create robot and NLP problem
+    q = []
+    dq = []
+    u = []
+    gam = []
+    m = []
+    for i in range(len(MotorData)):
+        motor = {"Im": MotorData[i, 0], "cs": MotorData[i, 3], 
+                "ms": MotorData[i, 2], "mt": MotorData[i, 4]}
+        # print(motor)
+        print("="*50)
+        print("MotorId:", i)
+        print("motor Params: ", motor)
+        robot = Bipedal_hybrid(cfg, motor)
+        nonlinearOptimization = nlp(robot, cfg, motor_id=i)
+        qi, dqi, ddqi, ui, t, gammai, mi = nonlinearOptimization.solve_and_output(
+            robot, i, flag_save=save_flag, StorePath=save_dir, date = date)
+
+        q.append(qi)
+        dq.append(dqi)
+        u.append(ui)
+        gam.append(gammai)
+        m.append(mi)
+        
+    print("="*50)
+    print("gamma:", gam)
+    print("="*50)
+    print("m:", m)
+    print("="*50)
+    # endregion
+
+    # region: ParamsCal
+    Lam = []
+    EndVel = []
+    for i in range(MoterNum):
+        mm = []
+        I = []
+        m_bd = cfg['Robot']['Mass']['mass']
+        Length = cfg['Robot']['Geometry']['length']
+        lc = cfg['Robot']['Mass']['massCenter']
+        dof = len(Length)
+        for j in range(dof):
+            if j < 2:
+                mm.append(m[i][j])
+                I.append(m[i][j]*Length[j]**2/12)
+            else:
+                mm.append(m_bd[j-2])
+                I.append(m_bd[j-2]*Length[j]**2/12)
+
+        Params = ParamsCal(dof, L=Length, l=lc)
+        motor = {"Im": MotorData[i, 0], "cs": MotorData[i, 3], 
+                "ms": MotorData[i, 2], "mt": MotorData[i, 4]}
+        CostFun, Vend, Hmt, Lami, EndVeli = Params.get_costfun2(cfg, motor, q[i], dq[i], u[i], mm, gam[i], I, motor_id=i)
+        Lam.append(Lami)
+        EndVel.append(EndVeli)
+        # print(CostFun)
+    # endregion
+
+    # region: visulization
+    if vis_flag:
+        params = {
+            'text.usetex': True,
+            'font.size': 15,
+            'axes.titlesize': 15,
+            'legend.fontsize': 10,
+            'axes.labelsize': 20,
+            'lines.linewidth': 3,
+            'xtick.labelsize': 15,
+            'ytick.labelsize': 15,
+            'axes.titlepad': 3.0,
+            'axes.labelpad': 3.0,
+            'lines.markersize': 8,
+            'figure.subplot.wspace': 0.4,
+            'figure.subplot.hspace': 0.8,
+        }
+
+        plt.rcParams.update(params)
+        vis = DataProcess(cfg, q, dq, 0, u, t, gam, m, save_dir, save_flag, date = date)
+        fig1 = vis.MultiMotorParams(Lam=Lam, EndVel=EndVel, MoterNum=MoterNum)
+        # fig3 = vis.VelAndMomtAnlysis(Vend=Vend, H=Hmt)
+
+        plt.show()
+        pass
+    # endregion
+
 if __name__ == "__main__":
-    main()
+    # main()
+    main2()
     pass

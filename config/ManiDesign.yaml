@@ -3,12 +3,12 @@ Optimization:
   RandomSeed: 1
 
   CostCoeff:
-    trackingCoeff: 0.6
+    MomtCoeff: 0.3
+    PosCoeff: 0.5
     VelCoeff: 0.0
-    powerCoeff: 0.1
-    forceCoeff: 0.2
-    smoothCoeff: 0.1
-    ImpactCoeff: 0.0
+    PowerCoeff: 0.0
+    ForceCoeff: 0.1
+    SmoothCoeff: 0.1
 
 Environment:
   Gravity: 9.8
@@ -17,7 +17,7 @@ Environment:
 
 Controller:
   Target: 5
-  Period: 2
+  Period: 0.1
   dt: 0.001
   CollectionNum: 500
   
@@ -33,19 +33,57 @@ Ref:
   offset: 0.4
   alpha: 0.15
   beta: -200
+  H_tar: 5
+  V_tar: 50
 
 Robot:
   Mass:
-    mass: []
-    inertia: []
-    massCenter: [0.175, 0.175]
+    mass: [0.09]
+    inertia: [0.0024]
+    massCenter: [0.175, 0.175, 0.3]
+    Upper: [5.0, 5.0]
+    Lower: [1.0, 1.0]
   Geometry:
-    length: [0.35, 0.35]
+    length: [0.35, 0.35, 0.55]
   damping: 0.0
+  Gear:
+    # Upper: [50.0, 20.0, 10.0]
+    Upper: [100.0, 30.0, 20.0]
+    Lower: [1.0, 1.0, 1.0]
   Motor:
-    Inertia: 0.0005
-    MaxTorque: 36
-    MaxSpeed: 54
-    CriticalSpeed: 30
+    # Inertia: 0.0005
+    # MaxTorque: 6
+    # MaxSpeed: 400
+    # CriticalSpeed: 200
+
+    # motor 0：力矩转速够
+    # Inertia: 0.00051
+    # MaxTorque: 2.0
+    # MaxSpeed: 205
+    # CriticalSpeed: 125
+
+    # motor 1
+    # Inertia: 0.0000216
+    # MaxTorque: 4.95
+    # MaxSpeed: 503
+    # CriticalSpeed: 157
+
+    # motor 1
+    # Inertia: 0.0000177
+    # MaxTorque: 4.1
+    # MaxSpeed: 377
+    # CriticalSpeed: 199
+
+    # motor 2
+    Inertia: 0.001246
+    MaxTorque: 4.17
+    MaxSpeed: 368
+    CriticalSpeed: 184
+
+    # motor 2
+    # Inertia: 0.00066
+    # MaxTorque: 3.8
+    # MaxSpeed: 297
+    # CriticalSpeed: 178
 
   

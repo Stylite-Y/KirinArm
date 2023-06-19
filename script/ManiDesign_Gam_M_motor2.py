@@ -3,6 +3,10 @@
         - 羽毛球二连杆模型: 基于角动量最大化优化机械臂参数
 2. 2023.06.05:
         - 羽毛球模型修正为三连杆: 基于角动量最大化优化机械臂参数
+3. 2023.06.09:
+        - 加入电机库参数，优化电机需求:同参数循环载入电机参数
+4. 2023.06.17:
+        - 加入电机库参数，优化电机需求: 不同电机参数单独设置参数
 '''
 
 import os
@@ -363,7 +367,7 @@ class nlp():
             MomtTar += -(Hi/H_m)**2 * robot.dt
             # VelTar += (ve/Ve_m - 1)**2 * robot.dt
             # VelTar += -((vei)/(Ve_m)**2) * robot.dt
-            VelTar += -(vei)/(Ve_m)**2 * robot.dt
+            VelTar += ((vei)/(Ve_m)**2 - 1)**2 * robot.dt
 
             for k in range(robot.dof):
                 power += ((robot.dq[i][k]*robot.u[i][k]) / (robot.motor_ms*robot.motor_mt))**2 * robot.dt
@@ -373,11 +377,11 @@ class nlp():
         # Final state costfun
         # VelTar += (ve/Ve_m - 1)**2
         # VelTar += -((vei)/(Ve_m)**2)
-        VelTar += -(vei)/(Ve_m)**2
+        VelTar += ((vei)/(Ve_m)**2 - 1)**2
         MomtTar += -(Hi/H_m)**2
         for i in range(robot.dof):
+            # PosTar += ((robot.q[-1][i] - P_tar[i])/q_m[k])**2 * 1.2
             PosTar += ((robot.q[-1][i] - P_tar[i])/q_m[k])**2 * 1.2
-            # PosTar += ((robot.q[-1][i] - P_tar[i])/q_m[k])**2
 
         for i in range(robot.N-1):
             for k in range(robot.dof):
@@ -462,12 +466,11 @@ class nlp():
         ceq.extend([robot.dq[0][0]==0])
         ceq.extend([robot.dq[0][1]==0])
         ceq.extend([robot.dq[0][2]==0])
-        # ceq.extend([robot.dq[-1][2]>=0])
 
         # region smooth constraint
         for j in range(len(robot.u)-1):
             ceq.extend([(robot.u[j][k]-robot.u
-                        [j+1][k])**2 <= 100 for k in range(robot.dof)])
+                        [j+1][k])**2 <= 50 for k in range(robot.dof)])
             pass
         # endregion
 
@@ -538,9 +541,8 @@ class nlp():
                 dirname = "-Traj-Mtf_"+str(self.MomtCoeff)+"-Pf_"+str(self.PosCoeff)+"-Vf_"+str(self.VelCoeff)+\
                         "-Wf_"+str(self.PowerCoeff)+"-Ff_"+str(self.ForceCoeff)+"-Sf_"+str(self.SmoothCoeff)+\
                         "-T_"+str(self.T)
-                dirname2 = "Motor_1"
-                # save_dir = StorePath + date + dirname+ "/"+ dirname2+ "/"
-                save_dir = StorePath + date + dirname+ dirname2+ "/"
+                save_dir = StorePath + date + dirname+ "/"
+
                 if not os.path.isdir(save_dir):
                     os.makedirs(save_dir)
 
@@ -561,7 +563,6 @@ class nlp():
         # Cs = [-7.367e7, 5.46e7, -1.616e7, 2.444e6, -2.01e5, 8751, -174.4, 6.462, -0.3441]
         # Ce = [-4.753e5, 1.903e4, -2515, 175.8, 0.1355, -2.809]
         Cw = [np.pi, -0.2*np.pi]
-        # Cw = [20*np.pi, -0.2*np.pi]
 
         theta_s = []
         theta_e = []
@@ -579,18 +580,18 @@ class nlp():
             # theta_sm = Cs[0]*tt**3 + Cs[1]*tt**2 + Cs[2]*tt**1 + Cs[3]
             theta_em = Ce[0]*tt**5 + Ce[1]*tt**4 + Ce[2]*tt**3 + Ce[3]*tt**2 + \
                     Ce[4]*tt**1 + Ce[5]
-            theta_wm = Cw[0]*tt**2 + Cw[1]
+            theta_wm = Cw[0]*tt + Cw[1]
 
             dtheta_sm = 8*Cs[0]*tt**7 + 7*Cs[1]*tt**6 + 6*Cs[2]*tt**5 +5*Cs[3]*tt**4 + \
                     4*Cs[4]*tt**3 + 3*Cs[5]*tt**2 + 2*Cs[6]*tt**1 + Cs[7]
             dtheta_em = 5*Ce[0]*tt**4 + 4*Ce[1]*tt**3 + 3*Ce[2]*tt**2 + 2*Ce[3]*tt**1 + \
                     Ce[4]
-            dtheta_wm = 2*Cw[0]*tt
+            dtheta_wm = Cw[0]
 
             ddtheta_sm = 8*7*Cs[0]*tt**6 + 7*6*Cs[1]*tt**5 + 6*5*Cs[2]*tt**4 + 5*4*Cs[3]*tt**3 + \
                     4*3*Cs[4]*tt**2 + 3*2*Cs[5]*tt**1 + 2*1*Cs[6]
             ddtheta_em = 5*4*Ce[0]*tt**3 + 4*3*Ce[1]*tt**2 + 3*2*Ce[2]*tt**1 + 2*1*Ce[3]
-            ddtheta_wm = 2*Cw[0]
+            ddtheta_wm = Cw[0]
             
             theta_s.append(theta_sm)
             theta_e.append(theta_em)
@@ -754,7 +755,7 @@ class ParamsCal():
             # state process costfun
             MomtTar += -(Hi/H_m)**2 * dt
             # VelTar += -((vei)/(Ve_m)**2) * dt
-            VelTar += -((vei)/(Ve_m)**2) * dt
+            VelTar += ((vei)/(Ve_m)**2 - 1)**2 * dt
 
             for k in range(self.dof):
                 power += ((dq[i][k]*u[i][k]) / (motor_ms*motor_mt))**2 * dt
@@ -769,12 +770,12 @@ class ParamsCal():
 
         # Final state costfun
         # VelTar += -((vei)/(Ve_m)**2)
-        VelTar2 += -((vei)/(Ve_m)**2)
-        VelTar += -((vei)/(Ve_m)**2)
+        VelTar2 += ((vei)/(Ve_m)**2 - 1)**2
+        VelTar += ((vei)/(Ve_m)**2 - 1)**2
         MomtTar2 += -(Hi/H_m)**2
         for i in range(self.dof):
             # PosTar2 += ((q[-1][i] - P_tar[i])/q_UB[k])**2 * 1.2
-            PosTar2 += ((q[-1][i] - P_tar[i])/q_UB[k])**2
+            PosTar2 += ((q[-1][i] - P_tar[i])/q_UB[k])**2 * 1.2
 
         Pos[-1] = PosTar2
         Vel[-1] = VelTar

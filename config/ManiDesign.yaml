@@ -3,8 +3,8 @@ Optimization:
   RandomSeed: 1
 
   CostCoeff:
-    MomtCoeff: 0.3
-    PosCoeff: 0.5
+    MomtCoeff: 0.5
+    PosCoeff: 0.3
     VelCoeff: 0.0
     PowerCoeff: 0.0
     ForceCoeff: 0.1
@@ -17,7 +17,7 @@ Environment:
 
 Controller:
   Target: 5
-  Period: 0.1
+  Period: 0.15
   dt: 0.001
   CollectionNum: 500
   
@@ -33,14 +33,19 @@ Ref:
   offset: 0.4
   alpha: 0.15
   beta: -200
-  H_tar: 5
+  H_tar: 40
   V_tar: 50
 
 Robot:
   Mass:
-    mass: [0.09]
-    inertia: [0.0024]
-    massCenter: [0.175, 0.175, 0.3]
+    # 羽毛球拍
+    # mass: [0.09]
+    # inertia: [0.0024]
+    # massCenter: [0.175, 0.175, 0.3]
+    # 羽毛球拍含手
+    mass: [1.09]
+    inertia: [0.00668]
+    massCenter: [0.175, 0.175, 0.073]
     Upper: [5.0, 5.0]
     Lower: [1.0, 1.0]
   Geometry:
@@ -51,10 +56,10 @@ Robot:
     Upper: [100.0, 30.0, 20.0]
     Lower: [1.0, 1.0, 1.0]
   Motor:
-    # Inertia: 0.0005
-    # MaxTorque: 6
-    # MaxSpeed: 400
-    # CriticalSpeed: 200
+    Inertia: 0.0005
+    MaxTorque: 6
+    MaxSpeed: 400
+    CriticalSpeed: 200
 
     # motor 0：力矩转速够
     # Inertia: 0.00051
@@ -75,10 +80,10 @@ Robot:
     # CriticalSpeed: 199
 
     # motor 2
-    Inertia: 0.001246
-    MaxTorque: 4.17
-    MaxSpeed: 368
-    CriticalSpeed: 184
+    # Inertia: 0.001246
+    # MaxTorque: 4.17
+    # MaxSpeed: 368
+    # CriticalSpeed: 184
 
     # motor 2
     # Inertia: 0.00066

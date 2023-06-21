@@ -360,7 +360,7 @@ def main():
     [ax_L[i].legend(fontsize=15) for i in range(2)]
 
     index = [r"$\mathbf{C}$",r"$\mathbf{D}$"]
-    axislabel = ["t (s)", r"$\tau (N.m)$"]
+    axislabel = ["t (s)", r"$\tau_{Elbow} (N.m)$"]
     [ax_m[0].plot(p, t_dq[i,:,1], label = anglabel[i]) for i in range(dof)]
     [ax_m[1].plot(p, t_m[i,:,1], label = linklabel[i]) for i in range(dof-1)]
     [ax_m[i].set_title(titlelabel_u[i]) for i in range(dof-1)]
@@ -371,7 +371,7 @@ def main():
     [ax_m[i].text(-0.1,1.1,index[i],transform=ax_m[i].transAxes) for i in range(dof-1)]
     [ax_m[i].legend(fontsize=15) for i in range(2)]
 
-    fig.savefig("Momt2.png", dpi=600)
+    fig.savefig("./image/MomtAnalysis/Momt_w.png", dpi=600)
     plt.show()
     pass
 

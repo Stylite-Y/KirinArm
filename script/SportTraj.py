@@ -7,8 +7,8 @@ import datetime
 
 def Badminton():
     Path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    DataFile_e = Path + '/data/Traj/badminton_elbow.txt'
-    DataFile_s = Path + '/data/Traj/badminton_shoulder.txt'
+    DataFile_e = Path + '/config/Traj/badminton_elbow.txt'
+    DataFile_s = Path + '/config/Traj/badminton_shoulder.txt'
 
     Data_e = np.loadtxt(DataFile_e)
     Data_s = np.loadtxt(DataFile_s)
@@ -21,7 +21,7 @@ def Badminton():
 
     ang_sa = ang_s*np.pi/180
     ang_ea = ang_e*np.pi/180
-    t = np.linspace(0, 0.1, len(ang_s))
+    t = np.linspace(0, 0.2, len(ang_s))
 
     # 与模型匹配的手臂角度
     ang_sm = ang_sa - np.pi/2

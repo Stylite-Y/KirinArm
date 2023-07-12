@@ -103,14 +103,14 @@ def ParamsCalGUI():
     window.title('Cycliod Params Calculate')
     
     # 第3步，设定窗口的大小(长 * 宽)
-    window.geometry('1400x900')  # 这里的乘是小x
+    window.geometry('1400x950')  # 这里的乘是小x
     w1 = tk.PanedWindow(window, relief='raised', width=500)
     w1.grid(row=0, column=0)
     w1.config(bg='white')
     w2 = tk.PanedWindow(window, relief='raised', width=500)
     w2.grid(row=0, column=1)
     w2.config(bg='white')
-    canvas = tk.Canvas(w1,bg='white',bd=0,height=340,width=550)
+    canvas = tk.Canvas(w1,bg='white',bd=0,height=340,width=600)
     canvas.config(highlightthickness=0)
     canvas.grid(row=0, column=0, columnspan=2)
     imagepath = '/home/hyyuan/Documents/Master/Manipulator/KirinArm/script/Hardware/fig/cv2.png'
@@ -134,14 +134,19 @@ def ParamsCalGUI():
     e2 = tk.Entry(w1, show=None, font=('Arial', 14), width=30)  # 显示成明文形式
     e2.grid(row=3, column=1)  
     # 柱销直径
-    l3 = tk.Label(w1, text='柱销直径(dsw): ', bg='white',fg='black', font=('Arial', 12), width=30, height=2, anchor=tk.W)
+    l3 = tk.Label(w1, text='径向间距(dr，齿阔线修形): ', bg='white',fg='black', font=('Arial', 12), width=30, height=2, anchor=tk.W)
     l3.grid(row=4, column=0)
-    e3 = tk.Entry(w1, show=None, font=('Arial', 14), width=30)  # 显示成明文形式
-    e3.grid(row=4, column=1)  
+    e4 = tk.Entry(w1, show=None, font=('Arial', 14), width=30)  # 显示成明文形式
+    e4.grid(row=4, column=1)  
 
     ## 可选参数
     linfo11 = tk.Label(w1, text='可变参数', bg='slategrey',fg='black',font=('Arial', 15), width=30, height=2)
-    linfo11.grid(row=6, column=0, rowspan=1, columnspan=1)
+    linfo11.grid(row=5, column=0, rowspan=1, columnspan=1)
+    # 柱销直径
+    l3 = tk.Label(w1, text='柱销直径(dsw): ', bg='white',fg='black', font=('Arial', 12), width=30, height=2, anchor=tk.W)
+    l3.grid(row=6, column=0)
+    e3 = tk.Entry(w1, show=None, font=('Arial', 14), width=30)  # 显示成明文形式
+    e3.grid(row=6, column=1)  
     # 变幅系数K1
     l11 = tk.Label(w1, text='变幅系数(K1)', bg='white',fg='black', font=('Arial', 12), width=30, height=2, anchor=tk.W)
     l11.grid(row=7, column=0)
@@ -284,27 +289,44 @@ def ParamsCalGUI():
     t13 = tk.Text(w2, width=30, height=1, font=('Arial', 14))
     lo13.grid(row=20, column=0)
     t13.grid(row=20, column=1)
+    # 移据修型
+    lo14 = tk.Label(w2, text='齿阔修型-移距修形量(dr_p): ', bg='white',fg='black',font=('Arial', 12), width=30, height=2, anchor=tk.W)
+    t14 = tk.Text(w2, width=30, height=1, font=('Arial', 14))
+    lo14.grid(row=21, column=0)
+    t14.grid(row=21, column=1)
+    # 等据修型
+    lo15 = tk.Label(w2, text='齿阔修型-等距修形量(dr_rp): ', bg='white',fg='black',font=('Arial', 12), width=30, height=2, anchor=tk.W)
+    t15 = tk.Text(w2, width=30, height=1, font=('Arial', 14))
+    lo15.grid(row=22, column=0)
+    t15.grid(row=22, column=1)
     # 空白行
     # 注释
-    t14 = tk.Label(w2, text=' ', bg='white',fg='black',font=('Arial', 12), width=30, height=5, anchor=tk.W)
-    t14.grid(row=21, column=0, columnspan=3)
+    t16 = tk.Label(w2, text=' ', bg='white',fg='black',font=('Arial', 12), width=30, height=5, anchor=tk.W)
+    t16.grid(row=23, column=0, columnspan=3)
     # 注释
-    t15 = tk.Text(w2, width=90, height=10, font=('Arial', 11))
-    t15.grid(row=23, column=0, columnspan=2)
+    t17 = tk.Text(w2, width=90, height=5, font=('Arial', 11))
+    t17.grid(row=24, column=0, columnspan=2)
     text1 = '注释: '
     text2 = '1. 柱销直径dsw也可以根据手册中的强度要求进行计算，但是太过复杂。'
     text3 = '2. 针齿销钉套直径(Drp + 2*delta)，delta指针齿套壁厚，一般取2~5 mm。'
-    t15.insert('insert', text1)
-    t15.insert(tk.INSERT, '\n')
-    t15.insert('insert', text2)
-    t15.insert(tk.INSERT, '\n')
-    t15.insert('insert', text3)
+    text4 = '3. dr_p, 负为直径变大，正为减小'
+    text5 = '4. dr_rp, 负为直径变小，正为变大'
+    t17.insert('insert', text1)
+    t17.insert(tk.INSERT, '\n')
+    t17.insert('insert', text2)
+    t17.insert(tk.INSERT, '\n')
+    t17.insert('insert', text3)
+    t17.insert(tk.INSERT, '\n')
+    t17.insert('insert', text4)
+    t17.insert(tk.INSERT, '\n')
+    t17.insert('insert', text5)
     # endregion
 
     def calculate():
         gam = int(e1.get())
         Dp = float(e2.get())
-        dsw = float(e3.get())
+        dr = float(e4.get())
+        # dsw = float(e3.get())
         K1 = e11.get()
         K2 = e21.get()
         B = e31.get()
@@ -315,8 +337,8 @@ def ParamsCalGUI():
                 raise ValueError(('invalid value: gam should be odd number!'))
             if Dp <= 0:
                 raise ValueError(('invalid value: Dp should be a positive number!'))
-            if dsw<=0:
-                raise ValueError(('invalid value: dsw should be a positive number!'))
+            # if dsw<=0:
+            #     raise ValueError(('invalid value: dsw should be a positive number!'))
         except ValueError as e:
             print("Error: ",repr(e))
         else:
@@ -373,13 +395,25 @@ def ParamsCalGUI():
                 B = 0.15*Dp/2
             else:
                 B = float(B)
+
             D1 = 0.4*Dp         # 摆线轮中心孔直径
             a = K1*Dp/(2*Zp)    # 偏心距
             D_rp = Dp/K2*np.sin(np.pi/Zp)         # 针径销钉套直径
             D_fc = Dp - 2*a - D_rp              # 摆线轮齿根圆直径
             Dw = (D_fc + D1)/2                  # 柱销中心园直径
-            drw = 1.4*dsw                       # 柱销套直径
-            dw = drw + 2*a+delta                      # 摆线轮销孔直径 
+            # drw = 1.4*dsw                       # 柱销套直径
+            # dw = drw + 2*a+delta                      # 摆线轮销孔直径 
+
+            dw1 = Dw - D1 - 2*0.03*Dp
+            dw2 = Dw*np.sin(np.pi/Zw) - 0.03*Dp
+            dw =min(dw1, dw2)
+            drw = dw - 2*a - delta
+            dsw = drw - 4
+
+            # 齿阔线修型
+            # dr = 0.02       # 径向间隙
+            dr_rp = dr/(1-np.sqrt(1-K1**2))
+            dr_p = -dr*np.sqrt(1-K1**2)/(1-np.sqrt(1-K1**2))
 
             # t1.insert('insert', gam)
             # t2.insert('insert', Zp)
@@ -394,13 +428,14 @@ def ParamsCalGUI():
             # t11.insert('insert', Zw)
             # t12.insert('insert', dsw)
             # t13.insert('insert', drw)
-            tt = [t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11, t12, t13]
-            params = [gam, Zp, a, Dp, D_rp, D_rp+4, D1, Dw, B, dw, Zw, dsw, drw]
+            tt = [t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11, t12, t13,  t14, t15]
+            params = [gam, Zp, a, Dp, D_rp-4, D_rp, D1, Dw, B, dw, Zw, dsw, drw,dr_p,dr_rp]
+
 
             for i in range(len(tt)):
                     tt[i].delete('1.0', 'end')
             for i in range(len(tt)):
-                    tt[i].insert('insert', params[i])
+                    tt[i].insert('insert', round(params[i],2))
             
         pass
     b1 = tk.Button(w1, text='计算', width=15, height=2, command=calculate)
